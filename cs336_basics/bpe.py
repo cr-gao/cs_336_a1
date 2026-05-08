@@ -9,7 +9,8 @@ def train_bpe(input_path, vocab_size, special_tokens):
         text = f.read()
         
         # Split text according to special tokens
-        special_patterns = "(" + "|".join(re.escape(token) for token in special_tokens) + ")"
+        sorted_specials = sorted(special_tokens, key=len, reverse=True)
+        special_patterns = "(" + "|".join(re.escape(token) for token in sorted_specials) + ")"
         final_chunks = []
         for chunk in re.split(special_patterns, text):
             if chunk in special_tokens:

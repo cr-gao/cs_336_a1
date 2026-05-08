@@ -19,7 +19,8 @@ def process_chunk(args):
     chunk_info, special_tokens, PAT = args
     file_path, start, end = chunk_info
     counter = Counter()
-    special_patterns = "(" + "|".join(re.escape(token) for token in special_tokens) + ")"
+    sorted_specials = sorted(special_tokens, key=len, reverse=True)
+    special_patterns = "(" + "|".join(re.escape(token) for token in sorted_specials) + ")"
     with open(file_path, 'r', encoding='utf-8') as f:
         f.seek(start)
         if(start != 0):
@@ -63,10 +64,11 @@ def get_initial_counters(file_path, special_tokens, PAT):
     return total_counter
 
 def train_bpe_on_tinystories(input_path, vocab_size, special_tokens):
-    # Split text according to special tokens
-    special_patterns = "(" + "|".join(re.escape(token) for token in special_tokens) + ")"
-    
+
     ''' Count frequencies -- single process streaming
+    sorted_specials = sorted(special_tokens, key=len, reverse=True)
+    special_patterns = "(" + "|".join(re.escape(token) for token in sorted_specials) + ")"
+
     from collections import Counter
     counter = Counter()
     with open(input_path, 'r', encoding='utf-8') as f:
