@@ -10,13 +10,63 @@ from cs336_basics.bpe import train_bpe
 from datasets import load_dataset
 from tqdm import tqdm
 
+from collections import Counter
+from multiprocessing import Pool, cpu_count
+
 PAT = r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+
+def process_chunk(args):
+    chunk_info, special_tokens, PAT = args
+    file_path, start, end = chunk_info
+    counter = Counter()
+    special_patterns = "(" + "|".join(re.escape(token) for token in special_tokens) + ")"
+    with open(file_path, 'r', encoding='utf-8') as f:
+        f.seek(start)
+        if(start != 0):
+            f.readline()  # Skip partial line
+        while f.tell() < end:
+            line = f.readline()
+            if not line:
+                break
+            for chunk in re.split(special_patterns, line):
+                if chunk in special_tokens:
+                    continue
+                sub_chunks = re.findall(PAT, chunk)
+                for sub_chunk in sub_chunks:
+                    byte_tuple = tuple(bytes([b]) for b in sub_chunk.encode('utf-8'))
+                    counter[byte_tuple] += 1
+    return counter
+
+def get_file_chunks(file_path, num_chunks):
+    file_size = os.path.getsize(file_path)
+    chunk_size = file_size // num_chunks
+    chunks = []
+    for i in range(num_chunks):
+        start = i * chunk_size
+        end = start + chunk_size if i < num_chunks - 1 else file_size
+        chunks.append((file_path, start, end))
+    return chunks
+
+def get_initial_counters(file_path, special_tokens, PAT):
+    num_workers = cpu_count()
+    chunks = get_file_chunks(file_path, num_workers)
+    
+    tasks = [(chunk, special_tokens, PAT) for chunk in chunks]
+    
+    total_counter = Counter()
+    with Pool(num_workers) as pool:
+        with tqdm(total=len(chunks), desc="Multiprocessing Pre-tokenization") as pbar:
+            for chunk_counter in pool.imap_unordered(process_chunk, tasks):
+                total_counter.update(chunk_counter)
+                pbar.update(1)
+
+    return total_counter
 
 def train_bpe_on_tinystories(input_path, vocab_size, special_tokens):
     # Split text according to special tokens
     special_patterns = "(" + "|".join(re.escape(token) for token in special_tokens) + ")"
     
-    # Count frequencies
+    ''' Count frequencies -- single process streaming
     from collections import Counter
     counter = Counter()
     with open(input_path, 'r', encoding='utf-8') as f:
@@ -31,6 +81,10 @@ def train_bpe_on_tinystories(input_path, vocab_size, special_tokens):
                         counter[byte_tuple] += 1
                     
                 pbar.update(len(line.encode('utf-8')))
+    '''
+    
+    # Count frequencies -- multi-process streaming
+    counter = get_initial_counters(input_path, special_tokens, PAT)
     
     pairs = Counter()
     pair_to_words = {}
@@ -140,7 +194,7 @@ def main():
     start_time = time.time()
     vocab, merges = train_bpe_on_tinystories(
         input_path=input_path,
-        vocab_size=1000,
+        vocab_size=10000,
         special_tokens=["<|endoftext|>"],
     )
     end_time = time.time()
