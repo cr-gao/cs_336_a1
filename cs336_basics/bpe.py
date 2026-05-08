@@ -1,5 +1,6 @@
 import regex as re
 import torch
+from tqdm import tqdm
 
 PAT = r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
@@ -36,6 +37,7 @@ def train_bpe(input_path, vocab_size, special_tokens):
         for(i, token) in enumerate(special_tokens, start=256):
             vocab[i] = token.encode('utf-8')
 
+        pbar = tqdm(total=vocab_size - 256 - len(special_tokens))
         merges = []
         while(len(vocab) < vocab_size):
             if not pairs:
@@ -76,5 +78,8 @@ def train_bpe(input_path, vocab_size, special_tokens):
                     
                 counter[new_word_tuple] = counter[word_tuple]
                 del counter[word_tuple]
+            
+            pbar.update(1)
+        pbar.close()
             
     return vocab, merges
