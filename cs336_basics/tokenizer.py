@@ -51,26 +51,8 @@ class Tokenizer:
                     part1, part2 = line.strip().split()
                     merges.append((part1.encode('utf-8'), part2.encode('utf-8')))
         return cls(vocab, merges, special_tokens)
-
-    def encode(self, text: str) -> list[int]:
-        '''
-        Encode an input text into a sequence of token IDs.
-        '''
-        # Split text according to special tokens
-        sorted_specials = sorted(self.special_tokens.keys(), key=len, reverse=True)
-        special_patterns = "(" + "|".join(re.escape(token) for token in sorted_specials) + ")"
-        final_chunks = []
-        if self.special_tokens:
-            for chunk in re.split(special_patterns, text):
-                if chunk in self.special_tokens:
-                    final_chunks.append(chunk)
-                    continue
-                for match in re.finditer(self.pat, chunk):
-                    final_chunks.append(match.group(0))
-        else:
-            for match in re.finditer(self.pat, text):
-                final_chunks.append(match.group(0))
-            
+    
+    def encode_chunk(self, chunk: str) -> list[int]:
         def merge_chunk(chunk_tokens, pair):
             new_chunk_tokens = []
             i = 0
@@ -83,21 +65,40 @@ class Tokenizer:
                     i += 1
             return new_chunk_tokens
         
-        curr_max_id = max(self.vocab.keys())
         token_ids = []
-        # Encode each chunk into token IDs
-        for chunk in final_chunks:
-            if chunk in self.special_tokens:
-                token_ids.append(self.special_tokens[chunk])
-            else:
-                chunk_tokens = [bytes([b]) for b in chunk.encode('utf-8')]
-                for merge in self.merges:
-                    if len(chunk_tokens) <= 1:
-                        break
-                    chunk_tokens = merge_chunk(chunk_tokens, merge)
-                        
-                for token in chunk_tokens:
-                    token_ids.append(self.vocab_inv[token])
+        if chunk in self.special_tokens:
+            return self.special_tokens[chunk]
+        else:
+            chunk_tokens = [bytes([b]) for b in chunk.encode('utf-8')]
+            for merge in self.merges:
+                if len(chunk_tokens) <= 1:
+                    break
+                chunk_tokens = merge_chunk(chunk_tokens, merge)
+                    
+            for token in chunk_tokens:
+                token_ids.append(self.vocab_inv[token])
+        return token_ids
+    
+    def encode(self, text: str) -> list[int]:
+        '''
+        Encode an input text into a sequence of token IDs.
+        '''
+        # Split text according to special tokens
+        sorted_specials = sorted(self.special_tokens.keys(), key=len, reverse=True)
+        special_patterns = "(" + "|".join(re.escape(token) for token in sorted_specials) + ")"
+        token_ids = []
+        if self.special_tokens:
+            for chunk in re.split(special_patterns, text):
+                if chunk in self.special_tokens:
+                    token_ids.append(self.special_tokens[chunk])
+                    continue
+                for match in re.finditer(self.pat, chunk):
+                    curr_chunk = match.group(0)
+                    token_ids.extend(self.encode_chunk(curr_chunk))
+        else:
+            for match in re.finditer(self.pat, text):
+                curr_chunk = match.group(0)
+                token_ids.extend(self.encode_chunk(curr_chunk))
                 
         return token_ids
 
