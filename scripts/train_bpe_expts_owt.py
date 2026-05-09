@@ -63,7 +63,7 @@ def get_initial_counters(file_path, special_tokens, PAT):
 
     return total_counter
 
-def train_bpe_on_tinystories(input_path, vocab_size, special_tokens):
+def train_bpe_on_openwebtext(input_path, vocab_size, special_tokens):
 
     ''' Count frequencies -- single process streaming
     sorted_specials = sorted(special_tokens, key=len, reverse=True)
@@ -149,29 +149,27 @@ def train_bpe_on_tinystories(input_path, vocab_size, special_tokens):
             
     return vocab, merges
 
-def prepare_full_tinystories(output_path="./data/tinystories_full.txt"):
-    if os.path.exists(output_path):
-        print(f"Data already exists: {output_path}")
-        return output_path
+def prepare_sample_openwebtext(output_path="./data/openwebtext_sample.txt", num_lines=100000):
+    # if os.path.exists(output_path):
+    #     print(f"Data already exists: {output_path}")
+    #     return output_path
 
-    print("Downloading from Hugging Face and preparing the dataset...")
+    print("Downloading and preparing the dataset...")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
-    # Load dataset from Hugging Face
-    dataset = load_dataset("roneneldan/TinyStories", split="train", streaming=True)
+    # Load dataset
+    dataset = load_dataset("Skylion007/openwebtext", split="train", streaming=True)
     
-    print("Writing to disk... This might take a few minutes.")
+    print(f"Writing the first {num_lines} lines to disk...")
     with open(output_path, "w", encoding="utf-8") as f:
         for i, example in enumerate(dataset):
+            if i >= num_lines:
+                break
             f.write(example["text"] + "\n")
-            if (i + 1) % 100000 == 0:
-                print(f"Processed {i + 1} stories...")
+            if  (i + 1) % 10000 == 0:
+                print(f"Written {i + 1} out of {num_lines} lines...")
     
-    with open(output_path, "w", encoding="utf-8") as f:
-        for text in dataset["text"]:
-            f.write(text + "\n")
-            
-    print(f"Full dataset ready: {output_path}")
+    print(f"Sample dataset ready: {output_path}")
     return output_path
 
 def save_readable_vocab_and_merges(vocab, merges, output_dir):
@@ -183,20 +181,20 @@ def save_readable_vocab_and_merges(vocab, merges, output_dir):
         for pair in merges
     ]
     
-    with open(output_dir / "vocab_readable_tinystories.json", "w", encoding="utf-8") as f:
+    with open(output_dir / "vocab_readable_owt.json", "w", encoding="utf-8") as f:
         json.dump(readable_vocab, f, ensure_ascii=False, indent=4)
-    with open(output_dir / "merges_readable_tinystories.json", "w", encoding="utf-8") as f:
+    with open(output_dir / "merges_readable_owt.json", "w", encoding="utf-8") as f:
         json.dump(readable_merges, f, ensure_ascii=False, indent=4)
 
 def main():
-    input_path = prepare_full_tinystories("./data/tinystories_full.txt")
+    input_path = prepare_sample_openwebtext("./data/openwebtext_sample.txt")
     output_dir = Path("output")
     output_dir.mkdir(exist_ok=True)\
 
     start_time = time.time()
-    vocab, merges = train_bpe_on_tinystories(
+    vocab, merges = train_bpe_on_openwebtext(
         input_path=input_path,
-        vocab_size=10000,
+        vocab_size=32000,
         special_tokens=["<|endoftext|>"],
     )
     end_time = time.time()
@@ -204,14 +202,14 @@ def main():
     print(f"Learned vocab of size {len(vocab)} and {len(merges)} merges.")
     
     # Save the vocab and merges to the output directory
-    with open(output_dir / "vocab_tinystories.pkl", "wb") as f:
+    with open(output_dir / "vocab_owt.pkl", "wb") as f:
         pickle.dump(vocab, f)
-    with open(output_dir / "merges_tinystories.pkl", "wb") as f:
+    with open(output_dir / "merges_owt.pkl", "wb") as f:
         pickle.dump(merges, f)
     
     save_readable_vocab_and_merges(vocab, merges, output_dir)
         
-    print(f"Saved vocab and merges to {output_dir / 'vocab_tinystories.pkl'} and {output_dir / 'merges_tinystories.pkl'}")
+    print(f"Saved vocab and merges to {output_dir / 'vocab_owt.pkl'} and {output_dir / 'merges_owt.pkl'}")
 
 if __name__ == "__main__":
     main()
