@@ -1,6 +1,8 @@
 from collections.abc import Iterable, Iterator
 import os
 import regex as re
+import numpy as np
+from tqdm.asyncio import tqdm
 
 class Tokenizer:
     def __init__(self, vocab, merges, special_tokens=None):
@@ -19,10 +21,10 @@ class Tokenizer:
         existing_vocab_inv = {v: k for k, v in vocab.items()}
         self.special_tokens = {}
         if special_tokens:
-            curr_max_id = max(self.vocab.keys())
+            curr_max_id = max(self.vocab.keys()) + 1
             for token in special_tokens:
-                if token in existing_vocab_inv:
-                    self.special_tokens[token] = existing_vocab_inv[token]
+                if token.encode('utf-8') in existing_vocab_inv:
+                    self.special_tokens[token] = existing_vocab_inv[token.encode('utf-8')]
                 else:
                     self.special_tokens[token] = curr_max_id
                     self.vocab[curr_max_id] = token.encode('utf-8')
@@ -76,6 +78,10 @@ class Tokenizer:
                 chunk_tokens = merge_chunk(chunk_tokens, merge)
                     
             for token in chunk_tokens:
+                if token not in self.vocab_inv:
+                    print(f"DEBUG: Missing Token = {token}")
+                    print(f"DEBUG: Is it in vocab values? {token in self.vocab.values()}")
+                    print(f"DEBUG: Token Type = {type(token)}")
                 token_ids.append(self.vocab_inv[token])
         return token_ids
     
@@ -122,3 +128,21 @@ class Tokenizer:
             token_bytes = self.vocab[token_id]
             byte_list.append(token_bytes)
         return b''.join(byte_list).decode('utf-8', errors='replace')
+    
+def encode_texts(tokenizer, input_path):
+    '''
+    Encode the input text file into a sequence of token IDs using the provided tokenizer and save the result to output_path.
+    '''
+    # if os.path.exists(output_path):
+    #     print(f"Encoded data already exists: {output_path}")
+    #     return output_path
+    
+    token_ids = []
+    with open(input_path, 'r', encoding='utf-8') as f:
+        with tqdm(total=os.path.getsize(input_path), unit='B', unit_scale=True, desc="Encoding texts") as pbar:
+            for line in f:
+                line_ids = tokenizer.encode(line)
+                token_ids.extend(line_ids)
+                pbar.update(len(line.encode('utf-8')))
+
+    return np.array(token_ids, dtype=np.uint16)

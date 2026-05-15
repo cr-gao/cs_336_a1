@@ -92,3 +92,5 @@ def gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_norm: float)
     if clip_coef < 1:
         for p in params:
             p.grad.data.mul_(clip_coef)
+            
+    return total_norm
