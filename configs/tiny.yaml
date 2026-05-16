@@ -53,3 +53,8 @@ logging:
 checkpoint:
   save_dir: checkpoints
   save_every: 1000
+
+generation: 
+  max_new_tokens: 256
+  temperature: 1.0
+  top_p: 0.95
