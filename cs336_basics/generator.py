@@ -14,6 +14,14 @@ def softmax(logits, temperature=1.0, dimension=-1):
     exp_logits = torch.exp(scaled_logits - torch.max(scaled_logits, dim=dimension, keepdim=True).values)
     return exp_logits / torch.sum(exp_logits, dim=dimension, keepdim=True)
 
+def truncate_kv_cache(kv_cache, max_length):
+    truncated_kv_cache = []
+    for K, V in kv_cache:
+        K = K[:, -max_length:, :]
+        V = V[:, -max_length:, :]
+        truncated_kv_cache.append((K, V))
+    return truncated_kv_cache
+
 def generate(
     model, 
     tokenizer, 
@@ -28,11 +36,9 @@ def generate(
     
     tokens = torch.tensor(tokenizer.encode(prompt)).unsqueeze(0).to(device)
     
-    for _ in range(max_new_tokens):
-        tokens_truncated = tokens[:, -context_size:]
-        with torch.no_grad():
-            logits = model(tokens_truncated)
-            
+    # prefill
+    logits, kv_cache = model(tokens, use_cache=True)
+    for _ in range(max_new_tokens):        
         probs = softmax(logits, temperature=temperature, dimension=-1)
         sorted_probs, sorted_indices = torch.sort(probs[:, -1, :], descending=True)
         cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
@@ -48,6 +54,12 @@ def generate(
         
         if tokenizer.decode([next_token.item()]) in tokenizer.special_tokens:
             break
+        
+        if kv_cache[0][0].shape[-2] > context_size:
+            kv_cache = truncate_kv_cache(kv_cache, context_size)
+        
+        with torch.no_grad():
+            logits, kv_cache = model(next_token, kv_cache=kv_cache, use_cache=True)
         
     return tokenizer.decode(tokens[0].tolist())
 

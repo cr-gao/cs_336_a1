@@ -166,7 +166,12 @@ class MultiHeadSelfAttention(nn.Module):
         if use_rope:
             self.rope = RotaryPositionalEmbedding(theta=theta or 10000.0, d_k=d_model // num_heads, max_seq_len=max_seq_len or 2048, device=device)
     
-    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+    def forward(self, 
+                x: torch.Tensor, 
+                token_positions: torch.Tensor, 
+                past_k=None, 
+                past_v=None, 
+                use_cache=False) -> torch.Tensor:
         Q = self.q_proj(x)
         K = self.k_proj(x)
         V = self.v_proj(x)
@@ -180,6 +185,10 @@ class MultiHeadSelfAttention(nn.Module):
         if self.use_rope:
             Q = self.rope(Q, token_positions)
             K = self.rope(K, token_positions)
+            
+        if past_k is not None and past_v is not None:
+            K = torch.cat([past_k, K], dim=-2)
+            V = torch.cat([past_v, V], dim=-2)
         
         causal_mask = torch.triu(torch.ones((T, T), device=x.device), diagonal=1).bool()
         causal_mask = ~causal_mask
@@ -187,8 +196,12 @@ class MultiHeadSelfAttention(nn.Module):
         attention_output = scaled_dot_product_attention(Q, K, V, causal_mask)
         attention_output = attention_output.transpose(1, 2).reshape(B, T, self.d_model)
         
-        return self.o_proj(attention_output)
-    
+        output = self.o_proj(attention_output)
+
+        if use_cache:
+            return output, K, V
+        return output
+
 class TransformerBlock(nn.Module):
     def __init__(self, d_model: int, num_heads: int, d_ff: int, use_rope: bool, theta: float | None=None, max_seq_len: int | None=None, device=None, dtype=None):
         super().__init__()
@@ -198,13 +211,23 @@ class TransformerBlock(nn.Module):
         self.norm1 = RMSNorm(d_model=d_model, device=device, dtype=dtype)
         self.norm2 = RMSNorm(d_model=d_model, device=device, dtype=dtype)
     
-    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
-        attn_output = self.attention(self.norm1(x), token_positions)
+    def forward(self, 
+                x: torch.Tensor, 
+                token_positions: torch.Tensor, 
+                past_k=None, 
+                past_v=None, 
+                use_cache=False) -> torch.Tensor:
+        if use_cache:
+            attn_output, K, V = self.attention(self.norm1(x), token_positions, past_k=past_k, past_v=past_v, use_cache=use_cache)
+        else:
+            attn_output = self.attention(self.norm1(x), token_positions)
         x = x + attn_output
         
         ffn_output = self.ffn(self.norm2(x))
         x = x + ffn_output
         
+        if use_cache:
+            return x, K, V
         return x
     
 class TransformerLM(nn.Module):
@@ -219,14 +242,35 @@ class TransformerLM(nn.Module):
         self.norm = RMSNorm(d_model=d_model, device=device, dtype=dtype)
         self.output_projection = Linear(d_model, vocab_size, device=device, dtype=dtype)
         
-    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, 
+                token_ids: torch.Tensor, 
+                kv_cache=None, 
+                use_cache=False) -> torch.Tensor:
         x = self.token_embedding(token_ids)
         
-        token_positions = torch.arange(token_ids.shape[-1], device=token_ids.device)
-        for layer in self.layers:
-            x = layer(x, token_positions)
+        if kv_cache is not None:
+            assert use_cache, "kv_cache provided but use_cache is False"
+            assert len(kv_cache) == len(self.layers), "Length of kv_cache must match number of layers"
+            past_length = kv_cache[0][0].shape[-2]
+            token_positions = torch.arange(past_length, past_length + token_ids.shape[-1], device=token_ids.device)
+        else:
+            token_positions = torch.arange(token_ids.shape[-1], device=token_ids.device)
+
+        new_kv_cache = []
+        for i, layer in enumerate(self.layers):
+            if kv_cache is not None:
+                past_k, past_v = kv_cache[i]
+                x, K, V = layer(x, token_positions, past_k=past_k, past_v=past_v, use_cache=use_cache)
+                new_kv_cache.append((K, V))
+            elif use_cache:
+                x, K, V = layer(x, token_positions, use_cache=use_cache)
+                new_kv_cache.append((K, V))
+            else:
+                x = layer(x, token_positions)
         
         x = self.norm(x)
         logits = self.output_projection(x)
+        if use_cache:
+            return logits, new_kv_cache
         return logits
         
